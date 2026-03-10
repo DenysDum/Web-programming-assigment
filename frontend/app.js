@@ -52,17 +52,30 @@ userAvatar.addEventListener('click', async () => {
 });
 
 // СПОСТЕРІГАЧ ЗА СТАНОМ АВТОРИЗАЦІЇ
-// Ця функція автоматично спрацьовує при вході, виході або перезавантаженні сторінки
 onAuthStateChanged(auth, (user) => {
     if (user) {
+        // Користувач залогінений
         currentUser = user;
         loginBtn.classList.add('hidden');
         userInfo.classList.remove('hidden');
         userAvatar.src = user.photoURL;
         userAvatar.title = `Log out (${user.displayName})`;
         
+        // --- НОВИЙ КОД ДЛЯ ПОКРАЩЕННЯ UX ---
+        // 1. Скидаємо ID чату, щоб бути готовими до нової розмови
+        currentChatId = null; 
+        
+        // 2. Змінюємо системне повідомлення на персоналізоване (англійською)
+        chatBox.innerHTML = `<div class="message ai-message">Welcome, ${user.displayName}! How can I help you today?</div>`;
+        
+        // 3. ОДРАЗУ розблоковуємо поле вводу та кнопку
+        userInput.disabled = false;
+        sendBtn.disabled = false;
+        // -----------------------------------
+        
         loadUserChats();
     } else {
+        // Користувач гість
         currentUser = null;
         currentChatId = null;
         loginBtn.classList.remove('hidden');
@@ -71,6 +84,8 @@ onAuthStateChanged(auth, (user) => {
         
         historyList.innerHTML = '<div class="history-item">Log in to see history</div>';
         chatBox.innerHTML = '<div class="message ai-message">Please log in with Google to start chatting.</div>';
+        
+        // Блокуємо поля для гостей
         userInput.disabled = true;
         sendBtn.disabled = true;
     }
