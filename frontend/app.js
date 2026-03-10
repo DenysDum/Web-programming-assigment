@@ -19,6 +19,7 @@ const db = getFirestore(app);
 
 let currentUser = null;
 let currentChatId = null;
+let isGenerating = false;
 const historyList = document.getElementById('history-list');
 const newChatBtn = document.getElementById('new-chat-btn');
 
@@ -181,9 +182,15 @@ async function loadUserChats() {
             
             // Обробка кліку по самому чату (для його відкриття)
             chatItem.addEventListener('click', () => {
+                // Якщо йде генерація - блокуємо перехід
+                if (isGenerating) {
+                    alert("Please wait for the AI to finish responding.");
+                    return;
+                }
+                
                 currentChatId = docSnap.id;
                 loadChatMessages(chatData.messages);
-                loadUserChats(); 
+                loadUserChats();
             });
             
             historyList.appendChild(chatItem);
@@ -208,15 +215,25 @@ function loadChatMessages(messages) {
 
 // Обробка кнопки "Новий чат"
 newChatBtn.addEventListener('click', () => {
-    if (!currentUser) return;
+    if (!currentUser || isGenerating) {
+        if (isGenerating) alert("Please wait for the AI to finish responding.");
+        return;
+    }
+    
     currentChatId = null;
-    chatBox.innerHTML = '<div class="message ai-message">Start a new conversation!</div>';
+    chatBox.innerHTML = `<div class="message ai-message">Welcome, ${currentUser.displayName}! How can I help you today?</div>`;
+    loadUserChats();
 });
 
 // Обробка відправки повідомлення
 async function handleSend() {
+    // Якщо генерація вже йде, блокуємо нові запити
+    if (isGenerating) return;
+
     const text = userInput.value.trim();
     if (text === '') return;
+
+    isGenerating = true;
 
     addMessage(text, 'user');
     userInput.value = '';
@@ -264,7 +281,6 @@ async function handleSend() {
     let fullAiResponse = ""; // Змінна для накопичення повної відповіді ШІ
 
     // ЗБИРАЄМО ІСТОРІЮ ДЛЯ КОНТЕКСТУ
-    // 1. ЗБИРАЄМО ІСТОРІЮ ДЛЯ КОНТЕКСТУ
     const historyForGemini = [];
     const messageNodes = chatBox.querySelectorAll('.message');
     
@@ -347,6 +363,8 @@ async function handleSend() {
         userInput.disabled = false;
         sendBtn.disabled = false;
         userInput.focus();
+
+        isGenerating = false;
     }
 }
 
