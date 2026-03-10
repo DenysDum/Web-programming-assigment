@@ -255,7 +255,7 @@ async function handleSend() {
         });
     }
     try {
-        const response = await fetch('https://my-ai-chat-backend-pblt.onrender.com/', {
+        const response = await fetch('https://my-ai-chat-backend-pblt.onrender.com/api/chat', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ prompt: text, history: historyForGemini })
