@@ -221,6 +221,16 @@ async function handleSend() {
     addMessage(text, 'user');
     userInput.value = '';
     const aiMessageDiv = addMessage('', 'ai');
+
+    // Анімація очікування
+    aiMessageDiv.innerHTML = `
+        <div class="typing-indicator">
+            <span></span><span></span><span></span>
+        </div>
+    `;
+    
+    userInput.value = '';
+    userInput.disabled = true;
     
     userInput.disabled = true;
     sendBtn.disabled = true;
