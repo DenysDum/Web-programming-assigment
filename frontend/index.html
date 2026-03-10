@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OrangePie</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="app-container">
+        <aside class="sidebar">
+            <button id="new-chat-btn" class="new-chat-btn">
+                <span>+</span> New chat
+            </button>
+            
+            <div class="history-section">
+                <h3>Recent chats</h3>
+                <div class="history-list" id="history-list">
+                </div>
+            </div>
+        </aside>
+
+        <main class="main-content">
+            <header class="top-bar">
+                <h2>OrangePie AI Assistant</h2>
+                <div class="auth-section">
+                    <button id="login-btn" class="login-btn">Log in with Google</button>
+                    
+                    <div id="user-info" class="user-info hidden">
+                        <img id="user-avatar" src="" alt="User" class="avatar-img" title="Click to log out">
+                    </div>
+                </div>
+            </header>
+            
+            <div id="chat-box" class="chat-box">
+                <div class="message ai-message">
+                    Hi! ask me anything.
+                </div>
+            </div>
+
+            <div class="input-wrapper">
+                <div class="input-container">
+                    <input type="text" id="user-input" placeholder="Type your question here..." autocomplete="off">
+                    <button id="send-btn" title="Send">➔</button>
+                </div>
+                <p class="disclaimer">AI can make mistakes. Please do double-checks.</p>
+            </div>
+        </main>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <script type="module" src="app.js"></script>
+    
+</body>
+</html>
