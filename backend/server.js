@@ -4,8 +4,15 @@ const cors = require('cors');
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 const admin = require('firebase-admin'); // Підключаємо Firebase Admin
 
-// У форматі require читати JSON дуже просто - достатньо одного рядка
-const serviceAccount = require('./firebase-service-account.json');
+let serviceAccount;
+
+// Перевіряємо, чи є ключ у змінних оточеннях (це для Render)
+if (process.env.FIREBASE_SERVICE_ACCOUNT) {
+    serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
+} else {
+    // Якщо немає, значить ми запускаємо локально - читаємо з файлу
+    serviceAccount = require('./firebase-service-account.json');
+}
 
 // Ініціалізуємо Firebase Admin
 admin.initializeApp({
