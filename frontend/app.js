@@ -1,7 +1,6 @@
 // Імпортуємо функції Firebase прямо з CDN (бо ми не використовуємо збирачі типу Webpack)
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
 import { getAuth, signInWithPopup, GoogleAuthProvider, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
-import { getFirestore, collection, addDoc, getDocs, query, orderBy, serverTimestamp, where, doc, updateDoc, arrayUnion, deleteDoc } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 
 const firebaseConfig = {
   apiKey: "AIzaSyCcuo5rBjhtQ4DBCeDclAHO8SKHtd98Mu4",
@@ -15,21 +14,24 @@ const firebaseConfig = {
 // Ініціалізація Firebase
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
-const db = getFirestore(app);
-
-let currentUser = null;
-let currentChatId = null;
-let isGenerating = false;
-const historyList = document.getElementById('history-list');
-const newChatBtn = document.getElementById('new-chat-btn');
 
 // Ініціалізуємо провайдера Google
 const provider = new GoogleAuthProvider();
 
+const API_BASE_URL = 'https://my-ai-chat-backend-pblt.onrender.com';
+
+let currentUser = null;
+let currentChatId = null;
+
+let isGenerating = false;
+
 // Знаходимо елементи авторизації на сторінці
+const historyList = document.getElementById('history-list');
+const newChatBtn = document.getElementById('new-chat-btn');
 const loginBtn = document.getElementById('login-btn');
 const userInfo = document.getElementById('user-info');
 const userAvatar = document.getElementById('user-avatar');
+
 
 // Функція входу
 loginBtn.addEventListener('click', async () => {
@@ -121,53 +123,50 @@ async function loadUserChats() {
     historyList.innerHTML = '<div class="history-item">Loading...</div>';
     
     try {
-        const q = query(
-            collection(db, "chats"), 
-            where("userId", "==", currentUser.uid),
-            orderBy("createdAt", "desc")
-        );
+        // 1. READ: Просимо бекенд дати нам чати цього користувача
+        const response = await fetch(`${API_BASE_URL}/api/chats/${currentUser.uid}`);
+        if (!response.ok) throw new Error("Failed to fetch chats");
         
-        const querySnapshot = await getDocs(q);
+        const chats = await response.json();
         historyList.innerHTML = ''; 
         
-        if (querySnapshot.empty) {
+        if (chats.length === 0) {
             historyList.innerHTML = '<div class="history-item">No chats yet</div>';
             return;
         }
 
-        querySnapshot.forEach((docSnap) => {
-            const chatData = docSnap.data();
+        chats.forEach((chatData) => {
             const chatItem = document.createElement('div');
             chatItem.classList.add('history-item');
-            if (docSnap.id === currentChatId) chatItem.classList.add('active');
+            if (chatData.id === currentChatId) chatItem.classList.add('active');
             
-            // Створюємо контейнер для назви чату
             const titleSpan = document.createElement('span');
             titleSpan.classList.add('chat-title');
             titleSpan.textContent = chatData.title;
             
-            // Створюємо кнопку видалення
             const deleteBtn = document.createElement('button');
             deleteBtn.classList.add('delete-chat-btn');
             deleteBtn.innerHTML = '🗑️';
             deleteBtn.title = "Delete chat";
             
-            // Обробка кліку по кнопці видалення
+            // 2. DELETE: Просимо бекенд видалити чат
             deleteBtn.addEventListener('click', async (e) => {
-                e.stopPropagation(); // Щоб клік по кошику не відкривав чат
+                e.stopPropagation(); 
+                if (isGenerating) {
+                    alert("Please wait for the AI to finish responding.");
+                    return;
+                }
                 
                 if (confirm("Are you sure you want to delete this chat?")) {
                     try {
-                        // Видаляємо документ з бази Firebase
-                        await deleteDoc(doc(db, "chats", docSnap.id));
+                        await fetch(`${API_BASE_URL}/api/chats/${chatData.id}`, {
+                            method: 'DELETE'
+                        });
                         
-                        // Якщо ми видалили той чат, який зараз відкритий, очищаємо екран
-                        if (currentChatId === docSnap.id) {
+                        if (currentChatId === chatData.id) {
                             currentChatId = null;
-                            chatBox.innerHTML = '<div class="message ai-message">Start a new conversation!</div>';
+                            chatBox.innerHTML = `<div class="message ai-message">Welcome, ${currentUser.displayName}! How can I help you today?</div>`;
                         }
-                        
-                        // Оновлюємо бокове меню
                         loadUserChats();
                     } catch (error) {
                         console.error("Error deleting chat:", error);
@@ -176,30 +175,24 @@ async function loadUserChats() {
                 }
             });
             
-            // Додаємо елементи в chatItem
             chatItem.appendChild(titleSpan);
             chatItem.appendChild(deleteBtn);
             
-            // Обробка кліку по самому чату (для його відкриття)
             chatItem.addEventListener('click', () => {
-                // Якщо йде генерація - блокуємо перехід
                 if (isGenerating) {
                     alert("Please wait for the AI to finish responding.");
                     return;
                 }
-                
-                currentChatId = docSnap.id;
+                currentChatId = chatData.id;
                 loadChatMessages(chatData.messages);
-                loadUserChats();
+                loadUserChats(); 
             });
             
             historyList.appendChild(chatItem);
         });
     } catch (error) {
         console.error("History loading error:", error);
-        historyList.innerHTML = `<div class="history-item" style="color: red; font-size: 12px;">
-            Loading error. Check console.
-        </div>`;
+        historyList.innerHTML = `<div class="history-item" style="color: red; font-size: 12px;">Loading error.</div>`;
     }
 }
 
@@ -252,31 +245,6 @@ async function handleSend() {
     userInput.disabled = true;
     sendBtn.disabled = true;
 
-    // ЗБЕРЕЖЕННЯ ПОВІДОМЛЕННЯ КОРИСТУВАЧА В БАЗУ
-    if (currentUser) {
-        try {
-            if (!currentChatId) {
-                // Створюємо новий чат
-                const newChatRef = await addDoc(collection(db, "chats"), {
-                    userId: currentUser.uid,
-                    title: text.substring(0, 30) + (text.length > 30 ? "..." : ""),
-                    messages: [{ sender: 'user', text: text }],
-                    createdAt: serverTimestamp()
-                });
-                currentChatId = newChatRef.id;
-                loadUserChats(); // Оновлюємо бокове меню, щоб новий чат з'явився там
-            } else {
-                // Додаємо повідомлення до існуючого чату
-                const chatRef = doc(db, "chats", currentChatId);
-                await updateDoc(chatRef, {
-                    messages: arrayUnion({ sender: 'user', text: text })
-                });
-            }
-        } catch (error) {
-            console.error("Error saving user message to Firebase:", error);
-        }
-    }
-
     let reader;
     let fullAiResponse = ""; // Змінна для накопичення повної відповіді ШІ
 
@@ -296,7 +264,7 @@ async function handleSend() {
         });
     }
     try {
-        const response = await fetch('https://my-ai-chat-backend-pblt.onrender.com/api/chat', {
+        const response = await fetch(`${API_BASE_URL}/api/chat`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ prompt: text, history: historyForGemini })
@@ -319,15 +287,41 @@ async function handleSend() {
                     const dataStr = line.replace('data: ', '').trim();
                     
                     if (dataStr === '[DONE]') {
-                        // КОЛИ ГЕНЕРАЦІЯ ЗАВЕРШЕНА - ЗБЕРІГАЄМО ВІДПОВІДЬ ШІ В БАЗУ
-                        if (currentUser && currentChatId && fullAiResponse) {
+                        // КОЛИ ГЕНЕРАЦІЯ ЗАВЕРШЕНА - ПРОСИМО БЕКЕНД ЗБЕРЕГТИ ДАНІ
+                        if (currentUser && fullAiResponse) {
                             try {
-                                const chatRef = doc(db, "chats", currentChatId);
-                                await updateDoc(chatRef, {
-                                    messages: arrayUnion({ sender: 'ai', text: fullAiResponse })
-                                });
+                                if (!currentChatId) {
+                                    // 3. CREATE: Просимо сервер створити новий запис
+                                    const createRes = await fetch(`${API_BASE_URL}/api/chats`, {
+                                        method: 'POST',
+                                        headers: { 'Content-Type': 'application/json' },
+                                        body: JSON.stringify({
+                                            userId: currentUser.uid,
+                                            title: text.substring(0, 30) + (text.length > 30 ? "..." : ""),
+                                            messages: [
+                                                { sender: 'user', text: text },
+                                                { sender: 'ai', text: fullAiResponse }
+                                            ]
+                                        })
+                                    });
+                                    const newChatData = await createRes.json();
+                                    currentChatId = newChatData.id;
+                                    loadUserChats(); 
+                                } else {
+                                    // 4. UPDATE: Просимо сервер додати повідомлення в існуючий чат
+                                    await fetch(`${API_BASE_URL}/api/chats/${currentChatId}`, {
+                                        method: 'PUT',
+                                        headers: { 'Content-Type': 'application/json' },
+                                        body: JSON.stringify({
+                                            newMessages: [
+                                                { sender: 'user', text: text },
+                                                { sender: 'ai', text: fullAiResponse }
+                                            ]
+                                        })
+                                    });
+                                }
                             } catch (error) {
-                                console.error("Error saving AI message to Firebase:", error);
+                                console.error("Error saving via Backend:", error);
                             }
                         }
                         return; 
