@@ -178,14 +178,26 @@ async function loadUserChats() {
             chatItem.appendChild(titleSpan);
             chatItem.appendChild(deleteBtn);
             
-            chatItem.addEventListener('click', () => {
+            chatItem.addEventListener('click', async () => {
                 if (isGenerating) {
                     alert("Please wait for the AI to finish responding.");
                     return;
                 }
                 currentChatId = chatData.id;
-                loadChatMessages(chatData.messages);
-                loadUserChats(); 
+                
+                // Показуємо завантаження
+                chatBox.innerHTML = '<div class="message ai-message">Loading messages...</div>';
+                
+                try {
+                    // Запитуємо повідомлення ТІЛЬКИ для цього чату
+                    const res = await fetch(`${API_BASE_URL}/api/chats/single/${chatData.id}`);
+                    const messages = await res.json();
+                    loadChatMessages(messages);
+                } catch (error) {
+                    chatBox.innerHTML = '<div class="message ai-message">Failed to load messages.</div>';
+                }
+                
+                loadUserChats(); // Оновлюємо виділення активного чату
             });
             
             historyList.appendChild(chatItem);
@@ -267,7 +279,12 @@ async function handleSend() {
         const response = await fetch(`${API_BASE_URL}/api/chat`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ prompt: text, history: historyForGemini })
+            body: JSON.stringify({ 
+                prompt: text, 
+                history: historyForGemini, 
+                userId: currentUser.uid,
+                chatId: currentChatId
+            })
         });
 
         if (!response.ok) throw new Error(`Server error: ${response.status}`);
@@ -286,45 +303,32 @@ async function handleSend() {
                 if (line.startsWith('data: ')) {
                     const dataStr = line.replace('data: ', '').trim();
                     
-                    if (dataStr === '[DONE]') {
-                        // КОЛИ ГЕНЕРАЦІЯ ЗАВЕРШЕНА - ПРОСИМО БЕКЕНД ЗБЕРЕГТИ ДАНІ
-                        if (currentUser && fullAiResponse) {
-                            try {
-                                if (!currentChatId) {
-                                    // 3. CREATE: Просимо сервер створити новий запис
-                                    const createRes = await fetch(`${API_BASE_URL}/api/chats`, {
-                                        method: 'POST',
-                                        headers: { 'Content-Type': 'application/json' },
-                                        body: JSON.stringify({
-                                            userId: currentUser.uid,
-                                            title: text.substring(0, 30) + (text.length > 30 ? "..." : ""),
-                                            messages: [
-                                                { sender: 'user', text: text },
-                                                { sender: 'ai', text: fullAiResponse }
-                                            ]
-                                        })
-                                    });
-                                    const newChatData = await createRes.json();
-                                    currentChatId = newChatData.id;
-                                    loadUserChats(); 
-                                } else {
-                                    // 4. UPDATE: Просимо сервер додати повідомлення в існуючий чат
-                                    await fetch(`${API_BASE_URL}/api/chats/${currentChatId}`, {
-                                        method: 'PUT',
-                                        headers: { 'Content-Type': 'application/json' },
-                                        body: JSON.stringify({
-                                            newMessages: [
-                                                { sender: 'user', text: text },
-                                                { sender: 'ai', text: fullAiResponse }
-                                            ]
-                                        })
-                                    });
-                                }
-                            } catch (error) {
-                                console.error("Error saving via Backend:", error);
+                    try {
+                        const parsedData = JSON.parse(dataStr);
+                        
+                        // Якщо сервер надіслав ID нового чату - зберігаємо його і оновлюємо меню
+                        if (parsedData.chatId) {
+                            if (!currentChatId) {
+                                currentChatId = parsedData.chatId;
+                                loadUserChats();
                             }
+                        } 
+                        // Якщо сервер надіслав текст - малюємо його
+                        else if (parsedData.text) {
+                            fullAiResponse += parsedData.text; 
+                            aiMessageDiv.innerHTML = marked.parse(fullAiResponse); 
+                            chatBox.scrollTop = chatBox.scrollHeight;
+                        } 
+                        // Якщо помилка
+                        else if (parsedData.error) {
+                            errorFromBackend = parsedData.error;
                         }
-                        return; 
+                    } catch (e) {
+                        // Ігноруємо биті шматки JSON
+                    }
+                    
+                    if (dataStr === '[DONE]') {
+                        return; // Просто виходимо, сервер сам все зберіг!
                     }
                     
                     try {

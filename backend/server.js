@@ -43,30 +43,62 @@ app.use((req, res, next) => {
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 const model = genAI.getGenerativeModel({ model: "gemini-3.1-flash-lite-preview" });
 
-// Головний маршрут для генерації чату
+// Головний маршрут для генерації чату (з вбудованим збереженням)
 app.post('/api/chat', async (req, res) => {
     console.log("--> New prompt received:", req.body.prompt);
-    const { prompt, history } = req.body;
+    // Тепер ми приймаємо ще й userId та chatId з фронтенду
+    const { prompt, history, userId, chatId } = req.body;
 
-    if (!prompt) {
-        return res.status(400).json({ error: "Prompt is required" });
+    if (!prompt || !userId) {
+        return res.status(400).json({ error: "Prompt and userId are required" });
     }
 
     res.setHeader('Content-Type', 'text/event-stream');
     res.setHeader('Cache-Control', 'no-cache');
     res.setHeader('Connection', 'keep-alive');
 
-    try {
-        const chat = model.startChat({
-            history: history || []
-        });
+    let currentChatId = chatId;
 
+    try {
+        // --- 1. ЗБЕРІГАЄМО ПРОМПТ КОРИСТУВАЧА В БАЗУ ДО ГЕНЕРАЦІЇ ---
+        if (!currentChatId) {
+            // Створюємо новий чат
+            const newChat = {
+                userId,
+                title: prompt.substring(0, 30) + (prompt.length > 30 ? "..." : ""),
+                messages: [{ sender: 'user', text: prompt }],
+                createdAt: admin.firestore.FieldValue.serverTimestamp()
+            };
+            const docRef = await db.collection('chats').add(newChat);
+            currentChatId = docRef.id;
+        } else {
+            // Додаємо в існуючий
+            await db.collection('chats').doc(currentChatId).update({
+                messages: admin.firestore.FieldValue.arrayUnion({ sender: 'user', text: prompt })
+            });
+        }
+
+        // --- 2. ПОВІДОМЛЯЄМО ФРОНТЕНДУ ID ЧАТУ ---
+        // Відправляємо спеціальний сигнал на фронт, щоб він знав, у який чат ми зараз пишемо
+        res.write(`data: ${JSON.stringify({ chatId: currentChatId })}\n\n`);
+
+        // --- 3. ЗАПУСКАЄМО ШІ ---
+        const chat = model.startChat({ history: history || [] });
         const result = await chat.sendMessageStream(prompt);
 
+        let fullAiResponse = "";
         for await (const chunk of result.stream) {
             const chunkText = chunk.text();
-            const data = JSON.stringify({ text: chunkText });
-            res.write(`data: ${data}\n\n`);
+            fullAiResponse += chunkText; // Збираємо відповідь на сервері
+            res.write(`data: ${JSON.stringify({ text: chunkText })}\n\n`);
+        }
+
+        // --- 4. ЗБЕРІГАЄМО ВІДПОВІДЬ ШІ В БАЗУ ---
+        // Навіть якщо користувач закрив вкладку під час циклу вище, цей код виконається!
+        if (fullAiResponse) {
+            await db.collection('chats').doc(currentChatId).update({
+                messages: admin.firestore.FieldValue.arrayUnion({ sender: 'ai', text: fullAiResponse })
+            });
         }
 
         res.write('data: [DONE]\n\n');
@@ -74,17 +106,7 @@ app.post('/api/chat', async (req, res) => {
 
     } catch (error) {
         console.error("AI generation error:", error);
-        
-        let errorMessage = "Unknown error occured.";
-        
-        if (error.status === 503) {
-            errorMessage = "AI Model isn't available now. Please try again later.";
-        } else if (error.status === 429) {
-            errorMessage = "Prompt limit is exceeded. Please try again in few minutes";
-        } else if (error.message) {
-            errorMessage = error.message; 
-        }
-
+        let errorMessage = error.message || "Unknown error occured.";
         res.write(`data: ${JSON.stringify({ error: errorMessage })}\n\n`);
         res.write('data: [DONE]\n\n');
         res.end();
@@ -95,25 +117,43 @@ app.post('/api/chat', async (req, res) => {
 // МАРШРУТИ ДЛЯ РОБОТИ З БАЗОЮ ДАНИХ FIREBASE
 // ==========================================
 
-// 1. READ: Отримати всі чати конкретного користувача (для бокового меню)
+// 1. READ: Отримати лише СПИСОК чатів (без повідомлень) для бокового меню
 app.get('/api/chats/:userId', async (req, res) => {
-        console.log("--> New READ chats:", req.params);
     try {
         const { userId } = req.params;
-        const chatsRef = db.collection('chats');
-        // Шукаємо чати користувача і сортуємо від найновіших до найстаріших
-        const snapshot = await chatsRef.where('userId', '==', userId).orderBy('createdAt', 'desc').get();
+        const snapshot = await db.collection('chats')
+            .where('userId', '==', userId)
+            .orderBy('createdAt', 'desc')
+            .get();
 
         const chats = [];
         snapshot.forEach(doc => {
-            chats.push({ id: doc.id, ...doc.data() });
+            const data = doc.data();
+            // Повертаємо тільки ID і назву, ігноруючи масив messages!
+            chats.push({ id: doc.id, title: data.title }); 
         });
 
         res.json(chats);
-        console.log("READ: successful");
     } catch (error) {
         console.error("Error fetching chats:", error);
         res.status(500).json({ error: "Failed to fetch chats" });
+    }
+});
+
+// 1.5. READ: Отримати повідомлення КОНКРЕТНОГО чату (коли на нього клікнули)
+app.get('/api/chats/single/:chatId', async (req, res) => {
+    try {
+        const { chatId } = req.params;
+        const doc = await db.collection('chats').doc(chatId).get();
+        
+        if (!doc.exists) {
+            return res.status(404).json({ error: "Chat not found" });
+        }
+        
+        res.json(doc.data().messages || []);
+    } catch (error) {
+        console.error("Error fetching single chat:", error);
+        res.status(500).json({ error: "Failed to fetch messages" });
     }
 });
 
