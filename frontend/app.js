@@ -322,17 +322,23 @@ async function handleSend() {
                 if (line.startsWith('data: ')) {
                     const dataStr = line.replace('data: ', '').trim();
                     
+                    // Спочатку перевіряємо сигнал завершення
+                    if (dataStr === '[DONE]') {
+                        return; // Просто виходимо, сервер сам все зберіг!
+                    }
+                    
+                    // Потім обробляємо дані
                     try {
                         const parsedData = JSON.parse(dataStr);
                         
-                        // Якщо сервер надіслав ID нового чату - зберігаємо його і оновлюємо меню
+                        // Якщо сервер надіслав ID нового чату - зберігаємо його
                         if (parsedData.chatId) {
                             if (!currentChatId) {
                                 currentChatId = parsedData.chatId;
                                 loadUserChats();
                             }
                         } 
-                        // Якщо сервер надіслав текст - малюємо його
+                        // Якщо сервер надіслав текст - малюємо його ОДИН раз
                         else if (parsedData.text) {
                             fullAiResponse += parsedData.text; 
                             aiMessageDiv.innerHTML = marked.parse(fullAiResponse); 
@@ -340,32 +346,11 @@ async function handleSend() {
                         } 
                         // Якщо помилка
                         else if (parsedData.error) {
-                            errorFromBackend = parsedData.error;
-                        }
-                    } catch (e) {
-                        // Ігноруємо биті шматки JSON
-                    }
-                    
-                    if (dataStr === '[DONE]') {
-                        return; // Просто виходимо, сервер сам все зберіг!
-                    }
-                    
-                    try {
-                        const parsedData = JSON.parse(dataStr);
-                        if (parsedData.text) {
-                            // 1. Додаємо новий шматок до повної відповіді
-                            fullAiResponse += parsedData.text; 
-                            
-                            // 2. Парсимо ВЕСЬ накопичений текст і вставляємо як HTML
-                            aiMessageDiv.innerHTML = marked.parse(fullAiResponse); 
-                            
-                            chatBox.scrollTop = chatBox.scrollHeight;
-                        } else if (parsedData.error) {
                             aiMessageDiv.innerHTML += `<br><span style="color: #d32f2f; font-weight: bold;">Error: ${parsedData.error}</span>`;
                             chatBox.scrollTop = chatBox.scrollHeight;
                         }
                     } catch (e) {
-                        // Ігноруємо помилки парсингу
+                        // Ігноруємо биті шматки JSON
                     }
                 }
             }
@@ -389,17 +374,4 @@ async function handleSend() {
 sendBtn.addEventListener('click', handleSend);
 userInput.addEventListener('keypress', (event) => {
     if (event.key === 'Enter') handleSend();
-});
-
-// Логіка для підсвічування активного чату в боковій панелі
-historyItems.forEach(item => {
-    item.addEventListener('click', () => {
-        historyItems.forEach(el => el.classList.remove('active'));
-        item.classList.add('active');
-        chatBox.innerHTML = `
-            <div class="message ai-message">
-                You opened history: "${item.textContent}". How can I help further?
-            </div>
-        `;
-    });
 });
