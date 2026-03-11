@@ -120,14 +120,19 @@ function addMessage(text, sender) {
 
 async function loadUserChats() {
     if (!currentUser) return;
-    historyList.innerHTML = '<div class="history-item">Loading...</div>';
+    
+    // Показуємо "Loading..." ТІЛЬКИ якщо бокове меню абсолютно порожнє (при першому вході)
+    if (historyList.children.length === 0) {
+        historyList.innerHTML = '<div class="history-item">Loading...</div>';
+    }
     
     try {
-        // 1. READ: Просимо бекенд дати нам чати цього користувача
         const response = await fetch(`${API_BASE_URL}/api/chats/${currentUser.uid}`);
         if (!response.ok) throw new Error("Failed to fetch chats");
         
         const chats = await response.json();
+        
+        // Очищаємо список лише перед самим додаванням нових даних
         historyList.innerHTML = ''; 
         
         if (chats.length === 0) {
@@ -149,7 +154,6 @@ async function loadUserChats() {
             deleteBtn.innerHTML = '🗑️';
             deleteBtn.title = "Delete chat";
             
-            // 2. DELETE: Просимо бекенд видалити чат
             deleteBtn.addEventListener('click', async (e) => {
                 e.stopPropagation(); 
                 if (isGenerating) {
@@ -167,6 +171,7 @@ async function loadUserChats() {
                             currentChatId = null;
                             chatBox.innerHTML = `<div class="message ai-message">Welcome, ${currentUser.displayName}! How can I help you today?</div>`;
                         }
+                        // Тут ми залишаємо виклик, бо список реально змінився (елемент видалено)
                         loadUserChats();
                     } catch (error) {
                         console.error("Error deleting chat:", error);
@@ -178,18 +183,31 @@ async function loadUserChats() {
             chatItem.appendChild(titleSpan);
             chatItem.appendChild(deleteBtn);
             
+            // --- ОНОВЛЕНИЙ ОБРОБНИК КЛІКУ ПО ЧАТУ ---
             chatItem.addEventListener('click', async () => {
                 if (isGenerating) {
                     alert("Please wait for the AI to finish responding.");
                     return;
                 }
+                
+                // Якщо користувач клікнув на той самий чат, що вже відкритий - нічого не робимо
+                if (currentChatId === chatData.id) return;
+                
                 currentChatId = chatData.id;
                 
-                // Показуємо завантаження
-                chatBox.innerHTML = '<div class="message ai-message">Loading messages...</div>';
+                // 1. ВІЗУАЛЬНЕ ПЕРЕМИКАННЯ АКТИВНОГО КЛАСУ БЕЗ ПЕРЕЗАВАНТАЖЕННЯ СПИСКУ
+                document.querySelectorAll('.history-item').forEach(item => {
+                    item.classList.remove('active');
+                });
+                chatItem.classList.add('active');
+                
+                // 2. Використовуємо красиву анімацію очікування замість тексту
+                chatBox.innerHTML = `
+                    <div class="message ai-message">
+                        <div class="typing-indicator"><span></span><span></span><span></span></div>
+                    </div>`;
                 
                 try {
-                    // Запитуємо повідомлення ТІЛЬКИ для цього чату
                     const res = await fetch(`${API_BASE_URL}/api/chats/single/${chatData.id}`);
                     const messages = await res.json();
                     loadChatMessages(messages);
@@ -197,7 +215,7 @@ async function loadUserChats() {
                     chatBox.innerHTML = '<div class="message ai-message">Failed to load messages.</div>';
                 }
                 
-                loadUserChats(); // Оновлюємо виділення активного чату
+                // Ми ВИДАЛИЛИ звідси loadUserChats() ! Мерехтіння більше не буде.
             });
             
             historyList.appendChild(chatItem);
@@ -207,6 +225,7 @@ async function loadUserChats() {
         historyList.innerHTML = `<div class="history-item" style="color: red; font-size: 12px;">Loading error.</div>`;
     }
 }
+
 
 // Функція для відображення повідомлень вибраного чату
 function loadChatMessages(messages) {
